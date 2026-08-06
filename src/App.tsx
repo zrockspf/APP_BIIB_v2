@@ -98,7 +98,7 @@ const serviciosIniciales: Servicio[] = [
 ];
 
 // Enlace único de Google Apps Script
-const URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbywuVhKPjLikPd0hLGoiu5KeymcDm-n5h-f5EE_UyzzASdnm20bVinfqKblsjN7lV4d/exec";
+const URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbxJnXRcX0VxxM6AlU1yhW450cnhlyZ1DCre-jqvHNimFcO9bNjZoP-PaKaVppkbj3b93A/exec";
 
 export default function TallerJoyeroApp() {
   // --- ESTADOS DE SESIÓN Y CONTROL ---
@@ -170,7 +170,7 @@ export default function TallerJoyeroApp() {
   const cargarDatosDesdeNube = async () => {
     setCargando(true);
     try {
-      const respuesta = await fetch(`${URL_GOOGLE_SCRIPT}?tipo=sincronizar_completo&_=${Date.now()}`);
+      const respuesta = await fetch(`${URL_GOOGLE_SCRIPT}?accion=sincronizar_completo&_=${Date.now()}`);
       if (!respuesta.ok) throw new Error("No se pudo consultar Google Sheets");
       const datosNube = await respuesta.json();
 
@@ -182,13 +182,46 @@ export default function TallerJoyeroApp() {
       }
 
       if (Array.isArray(datosNube.remisiones)) {
-        setUltimasRemisiones(datosNube.remisiones);
-        localStorage.setItem("taller_remisiones", JSON.stringify(datosNube.remisiones));
+        const remisionesNormalizadas: Remision[] = datosNube.remisiones.map((r: any) => ({
+          folio: String(r.folio || ""),
+          fechaRecibido: String(r.fechaRecibido || ""),
+          fechaEntrega: String(r.fechaEntrega || ""),
+          cliente: String(r.cliente || ""),
+          celular: String(r.celular || ""),
+          trabajo: String(r.trabajo || ""),
+          cantidadPiezas: Number(r.cantidadPiezas || 0),
+          total: Number(r.total || 0),
+          anticipo: Number(r.anticipoOriginal ?? r.anticipo ?? 0),
+          saldo: Number(r.saldo || 0),
+          estado: String(r.estado || "En Proceso"),
+          foto: String(r.fotoURL || r.foto || ""),
+        }));
+        setUltimasRemisiones(remisionesNormalizadas);
+        localStorage.setItem("taller_remisiones", JSON.stringify(remisionesNormalizadas));
       }
 
       if (Array.isArray(datosNube.gastos)) {
-        setHistorialGastos(datosNube.gastos);
-        localStorage.setItem("taller_gastos", JSON.stringify(datosNube.gastos));
+        const gastosNormalizados: Gasto[] = datosNube.gastos.map((g: any) => ({
+          fecha: String(g.fecha || ""),
+          concepto: String(g.concepto === "Otro" ? (g.conceptoOtro || "Otro") : (g.concepto || "")),
+          categoria: String(g.categoriaInterna || g.categoria || "Otros"),
+          monto: Number(g.monto || 0),
+          metodoPago: (g.metodoPago || "Efectivo") as MetodoPago,
+        }));
+        setHistorialGastos(gastosNormalizados);
+        localStorage.setItem("taller_gastos", JSON.stringify(gastosNormalizados));
+      }
+
+      if (Array.isArray(datosNube.servicios)) {
+        const serviciosNormalizados: Servicio[] = datosNube.servicios.map((srv: any) => ({
+          id: String(srv.id || srv.nombreServicio || ""),
+          nombre: String(srv.nombreServicio || srv.nombre || ""),
+          precio: Number(srv.precioVenta ?? srv.precio ?? 0),
+          costo: Number(srv.costoMaterial ?? srv.costo ?? 0),
+          activo: srv.activo !== false,
+        }));
+        setServicios(serviciosNormalizados);
+        localStorage.setItem("taller_servicios", JSON.stringify(serviciosNormalizados));
       }
 
       if (datosNube.configuracion && typeof datosNube.configuracion === "object") {
@@ -363,7 +396,8 @@ export default function TallerJoyeroApp() {
     const folioAGuardar = folioActual;
 
     const datos = {
-      tipo: "nueva_remision",
+      accion: "crear_remision",
+      datos: {
       folio: folioAGuardar,
       fechaRecibido,
       fechaEntrega,
@@ -373,10 +407,12 @@ export default function TallerJoyeroApp() {
       cantidadPiezas: Number(cantidadPiezas || 1),
       total: totalNum,
       anticipo: anticipoNum,
-      metodoPagoAnticipo: anticipoNum > 0 ? metodoPagoAnticipo : "",
+      metodoPago: anticipoNum > 0 ? metodoPagoAnticipo : "Efectivo",
       saldo: saldoCalculado,
-      estado,
-      foto: fotoPieza
+      estado: "En Proceso",
+      foto: fotoPieza,
+      usuario
+      }
     };
 
     setCargando(true);
@@ -391,15 +427,7 @@ export default function TallerJoyeroApp() {
       const resultado = await respuesta.json();
 
       if (resultado.status === "success") {
-        if (anticipoNum > 0) {
-          void registrarMovimientoPago({
-            folio: folioAGuardar,
-            tipoMovimiento: "Anticipo",
-            monto: anticipoNum,
-            metodoPago: metodoPagoAnticipo,
-          });
-        }
-        alert(`✅ Nota #${folioAGuardar} guardada en la nube y foto procesada.`);
+        alert(`✅ Nota #${folioAGuardar} guardada en la nube.`);
         setFileInputKey(prev => prev + 1);
         await cargarDatosDesdeNube();
       } else {
@@ -409,7 +437,21 @@ export default function TallerJoyeroApp() {
     } catch (error: any) {
       console.error(error);
       alert("⚠️ Error de guardado asíncrono. Registrando copia local temporal.");
-      const copiaTemporal: Remision = { ...datos, cantidadPiezas: datos.cantidadPiezas };
+      const copiaTemporal: Remision = {
+        folio: folioAGuardar,
+        fechaRecibido,
+        fechaEntrega,
+        cliente,
+        celular,
+        trabajo,
+        cantidadPiezas: Number(cantidadPiezas || 1),
+        total: totalNum,
+        anticipo: anticipoNum,
+        saldo: saldoCalculado,
+        estado: "En Proceso",
+        foto: fotoPieza,
+        metodoPagoAnticipo,
+      };
       setUltimasRemisiones([copiaTemporal, ...ultimasRemisiones]);
     } finally {
       setCliente(""); setCelular(""); setTrabajo(""); setCantidadPiezas(""); setAnticipo(""); setMetodoPagoAnticipo("Efectivo"); setTotal(""); setEstado("en proceso"); setFotoPieza(""); setFechaRecibido(today); setFechaEntrega("");
@@ -417,43 +459,14 @@ export default function TallerJoyeroApp() {
     }
   };
 
-  const registrarMovimientoPago = async ({
-    folio,
-    tipoMovimiento,
-    monto,
-    metodoPago,
-  }: {
-    folio: string;
-    tipoMovimiento: "Anticipo" | "Liquidación";
-    monto: number;
-    metodoPago: MetodoPago;
-  }) => {
-    try {
-      await fetch(URL_GOOGLE_SCRIPT, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          tipo: "nuevo_movimiento_pago",
-          fecha: today,
-          hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
-          usuario,
-          folio,
-          tipoMovimiento,
-          monto,
-          metodoPago,
-        }),
-      });
-    } catch (error) {
-      console.error("No se pudo registrar el movimiento de pago:", error);
-    }
-  };
-
   // --- ACTUALIZAR EL ESTATUS DE UNA ORDEN EXISTENTE CON ROLLBACK SEGURO ---
   const actualizarEstatusFila = async (folio: string, nuevoEstado: string, metodoLiquidacion?: MetodoPago) => {
-    let anticipoActualizado: number | null = null;
-    let saldoActualizado: number | null = null;
+    const estadoNormalizado =
+      nuevoEstado.toLowerCase() === "entregado" ? "Entregado" :
+      nuevoEstado.toLowerCase() === "listo" ? "Listo" :
+      nuevoEstado.toLowerCase() === "cancelado" ? "Cancelado" : "En Proceso";
 
-    if (nuevoEstado === "entregado" && !metodoLiquidacion) {
+    if (estadoNormalizado === "Entregado" && !metodoLiquidacion) {
       const remision = ultimasRemisiones.find((item) => item.folio === folio);
       if (remision) {
         setEntregaPendiente(remision);
@@ -463,59 +476,40 @@ export default function TallerJoyeroApp() {
     }
 
     const respaldoRemisionesSeguras = [...ultimasRemisiones];
+    const remisionOriginal = respaldoRemisionesSeguras.find((item) => item.folio === folio);
 
-    const copiaRemisiones = ultimasRemisiones.map((rem) => {
-      if (rem.folio === folio) {
-        if (nuevoEstado === "entregado") {
-          anticipoActualizado = Number(rem.total);
-          saldoActualizado = 0;
-          return { ...rem, estado: nuevoEstado, anticipo: anticipoActualizado, saldo: saldoActualizado, metodoPagoLiquidacion: metodoLiquidacion };
-        }
-        return { ...rem, estado: nuevoEstado };
-      }
-      return rem;
-    });
-    
-    if (nuevoEstado === "entregado") {
-      setUltimasRemisiones(copiaRemisiones.filter(r => r.folio !== folio));
-    } else {
-      setUltimasRemisiones(copiaRemisiones);
-    }
+    setUltimasRemisiones((actuales) =>
+      estadoNormalizado === "Entregado"
+        ? actuales.filter((r) => r.folio !== folio)
+        : actuales.map((r) => r.folio === folio ? { ...r, estado: estadoNormalizado } : r)
+    );
 
     try {
       const respuesta = await fetch(URL_GOOGLE_SCRIPT, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ 
-          tipo: "actualizar_estatus",
-          folio: folio, 
-          estado: nuevoEstado === "entregado" ? "Entregado" : nuevoEstado,
-          completarPago: nuevoEstado === "entregado",
-          anticipo: anticipoActualizado,
-          saldo: saldoActualizado,
-          metodoPagoLiquidacion: metodoLiquidacion || ""
+        body: JSON.stringify({
+          accion: "actualizar_estado",
+          datos: {
+            folio,
+            estado: estadoNormalizado,
+            montoLiquidacion: estadoNormalizado === "Entregado" ? Number(remisionOriginal?.saldo || 0) : 0,
+            metodoPago: metodoLiquidacion || "Efectivo",
+            usuario,
+          },
         }),
       });
 
-      if (!respuesta.ok) throw new Error("Error de respuesta del servidor");
-
-      if (nuevoEstado === "entregado" && metodoLiquidacion) {
-        const remisionOriginal = respaldoRemisionesSeguras.find((item) => item.folio === folio);
-        const liquidacion = Number(remisionOriginal?.saldo || 0);
-        if (liquidacion > 0) {
-          void registrarMovimientoPago({
-            folio,
-            tipoMovimiento: "Liquidación",
-            monto: liquidacion,
-            metodoPago: metodoLiquidacion,
-          });
-        }
-        setEntregaPendiente(null);
+      const resultado = await respuesta.json();
+      if (!respuesta.ok || resultado.status !== "success") {
+        throw new Error(resultado.message || "Error de respuesta del servidor");
       }
 
+      if (estadoNormalizado === "Entregado") setEntregaPendiente(null);
+      await cargarDatosDesdeNube();
     } catch (error) {
       console.error("Error al actualizar estatus en la nube:", error);
-      alert("❌ No se pudo guardar el estatus en la nube. Reestableciendo estado anterior.");
+      alert("❌ No se pudo guardar el estatus en la nube. Se restableció el estado anterior.");
       setUltimasRemisiones(respaldoRemisionesSeguras);
     }
   };
@@ -530,16 +524,17 @@ export default function TallerJoyeroApp() {
       return;
     }
 
-    const categoriaCalculada = obtenerCategoriaGasto(conceptoGasto);
-    const payloadGasto = { 
-      tipo: "nuevo_gasto",
-      fecha: today, 
-      concepto: conceptoFinal, 
-      categoria: categoriaCalculada, 
-      monto: montoNumero,
-      metodoPago: metodoPagoGasto,
-      hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
-      usuario
+    const payloadGasto = {
+      accion: "registrar_gasto",
+      datos: {
+        fecha: today,
+        concepto: conceptoGasto,
+        conceptoOtro: conceptoGasto === "Otro" ? conceptoFinal : "",
+        monto: montoNumero,
+        metodoPago: metodoPagoGasto,
+        hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
+        usuario,
+      },
     };
 
     setCargando(true);
