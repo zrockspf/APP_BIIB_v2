@@ -56,7 +56,7 @@ export default function TallerJoyeroApp() {
   const [password, setPassword] = useState("");
   const [sesionIniciada, setSesionIniciada] = useState(false);
   const [rol, setRol] = useState("vendedor");
-  const [vistaAdmin, setVistaAdmin] = useState("remisiones");
+  const [vistaAdmin, setVistaAdmin] = useState("dashboard");
   const [cargando, setCargando] = useState(false);
 
   // --- ESTADOS FORMULARIO NUEVA REMISIÓN ---
@@ -158,6 +158,28 @@ export default function TallerJoyeroApp() {
     return ultimasRemisiones.filter((r) => !["entregado", "cancelado"].includes(String(r.estado).trim().toLowerCase()));
   }, [ultimasRemisiones]);
 
+  // --- INDICADORES DEL DASHBOARD (SOLO ADMINISTRADORES) ---
+  const indicadores = useMemo(() => {
+    const ahora = new Date();
+    const prefijoMes = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
+    const ventasHoy = ultimasRemisiones
+      .filter((r) => r.fechaRecibido === today && String(r.estado).toLowerCase() !== "cancelado")
+      .reduce((suma, r) => suma + Number(r.total || 0), 0);
+    const remisionesMes = ultimasRemisiones.filter(
+      (r) => String(r.fechaRecibido || "").startsWith(prefijoMes) && String(r.estado).toLowerCase() !== "cancelado"
+    );
+    const ventasMes = remisionesMes.reduce((suma, r) => suma + Number(r.total || 0), 0);
+    const anticiposMes = remisionesMes.reduce((suma, r) => suma + Number(r.anticipo || 0), 0);
+    const cobrosPendientes = ultimasRemisiones
+      .filter((r) => !["entregado", "cancelado"].includes(String(r.estado).toLowerCase()))
+      .reduce((suma, r) => suma + Number(r.saldo || 0), 0);
+    const gastosMes = historialGastos
+      .filter((g) => String(g.fecha || "").startsWith(prefijoMes))
+      .reduce((suma, g) => suma + Number(g.monto || 0), 0);
+    const utilidadFlujo = anticiposMes - gastosMes;
+    return { ventasHoy, ventasMes, anticiposMes, cobrosPendientes, gastosMes, utilidadFlujo, trabajosActivos: notasActivas.length };
+  }, [ultimasRemisiones, historialGastos, notasActivas, today]);
+
   // --- CAPTURA Y COMPRESIÓN AUTOMÁTICA DE FOTO ---
   const manejarCapturaFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const archivo = e.target.files?.[0];
@@ -197,6 +219,7 @@ export default function TallerJoyeroApp() {
     const encontrado = usuarios.find((u) => u.usuario === usuario && u.password === password);
     if (encontrado) {
       setRol(encontrado.rol);
+      setVistaAdmin(encontrado.rol === "admin" ? "dashboard" : "remisiones");
       setSesionIniciada(true);
     } else {
       alert("❌ Usuario o contraseña incorrectos");
@@ -365,7 +388,8 @@ export default function TallerJoyeroApp() {
             <div className="w-32 h-32 bg-white rounded-3xl p-3 shadow-lg border border-pink-200 flex items-center justify-center mb-4">
               <img src="/LOG_1_01.png" alt="Logo" className="w-full h-full object-contain" onError={(e)=>{e.currentTarget.src="https://via.placeholder.com/150?text=BIIB";}}/>
             </div>
-            <p className="text-gray-500 text-lg font-medium">Taller Joyero • Login</p>
+            <h1 className="text-2xl font-black text-pink-500">TALLER BIIB ERP</h1>
+            <p className="text-gray-500 text-sm font-medium">Administra. Controla. Crece.</p>
           </div>
           <div className="space-y-4">
             <input className="w-full border rounded-xl p-3" placeholder="Usuario" value={usuario} onChange={(e) => setUsuario(e.target.value)} />
@@ -385,8 +409,8 @@ export default function TallerJoyeroApp() {
         {/* HEADER */}
         <div className="bg-white rounded-3xl shadow-xl p-6 border-4 border-pink-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-pink-500">BIIB Taller Joyero</h1>
-            <p className="text-gray-500">Operador: <span className="font-bold uppercase">{usuario}</span></p>
+            <h1 className="text-3xl font-bold text-pink-500">TALLER BIIB ERP</h1>
+            <p className="text-gray-500">Operador: <span className="font-bold uppercase">{usuario}</span> · <span className="font-semibold">{rol === "admin" ? "SUPER ADMINISTRADOR" : "VENTAS"}</span></p>
           </div>
           <div className="flex gap-2">
             <button onClick={cargarDatosDesdeNube} className="bg-pink-100 text-pink-600 px-4 py-2 rounded-xl font-semibold text-sm hover:bg-pink-200">🔄 Sincronizar</button>
@@ -396,10 +420,81 @@ export default function TallerJoyeroApp() {
 
         {/* MENÚ ADMIN */}
         {rol === "admin" && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
+            <button onClick={() => setVistaAdmin("dashboard")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "dashboard" ? "bg-gray-900 text-white" : "bg-white"}`}>📊 Dashboard</button>
             <button onClick={() => setVistaAdmin("remisiones")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "remisiones" ? "bg-pink-500 text-white" : "bg-white"}`}>📋 Remisiones</button>
             <button onClick={() => setVistaAdmin("gastos")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "gastos" ? "bg-red-500 text-white" : "bg-white"}`}>💸 Gastos</button>
             <button onClick={() => setVistaAdmin("servicios")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "servicios" ? "bg-purple-500 text-white" : "bg-white"}`}>🛠 Servicios</button>
+          </div>
+        )}
+
+        {/* DASHBOARD EJECUTIVO (SOLO SUPER ADMINISTRADORES) */}
+        {rol === "admin" && vistaAdmin === "dashboard" && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-pink-500 to-purple-600 text-white rounded-3xl shadow-xl p-6">
+              <p className="text-sm font-semibold opacity-90">Resumen ejecutivo</p>
+              <h2 className="text-3xl font-black mt-1">Estado del taller</h2>
+              <p className="text-sm mt-2 opacity-90">Información visible únicamente para Bibi y Salvador.</p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                ["Ventas hoy", indicadores.ventasHoy, "💰", "text-emerald-600"],
+                ["Ventas del mes", indicadores.ventasMes, "📈", "text-pink-600"],
+                ["Cobrado del mes", indicadores.anticiposMes, "🏦", "text-blue-600"],
+                ["Gastos del mes", indicadores.gastosMes, "💸", "text-red-600"],
+                ["Flujo disponible", indicadores.utilidadFlujo, "💵", indicadores.utilidadFlujo >= 0 ? "text-emerald-600" : "text-red-600"],
+                ["Por cobrar", indicadores.cobrosPendientes, "📞", "text-orange-600"],
+              ].map(([titulo, valor, icono, clase]) => (
+                <div key={String(titulo)} className="bg-white rounded-3xl shadow-lg p-5 border border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-gray-500">{titulo}</p>
+                    <span className="text-2xl">{icono}</span>
+                  </div>
+                  <p className={`text-3xl font-black mt-3 ${clase}`}>${Number(valor).toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p>
+                </div>
+              ))}
+              <div className="bg-white rounded-3xl shadow-lg p-5 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-gray-500">Trabajos activos</p>
+                  <span className="text-2xl">📋</span>
+                </div>
+                <p className="text-3xl font-black mt-3 text-purple-600">{indicadores.trabajosActivos}</p>
+              </div>
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-3xl shadow-xl p-6">
+                <h3 className="text-xl font-black text-gray-800">Costos fijos mensuales</h3>
+                <div className="mt-4 space-y-3 text-sm">
+                  {[
+                    ["Nómina Suni", 13000], ["Nómina Salvador", 13000], ["Renta", 9700],
+                    ["Arrendamiento del auto", 13000], ["Internet", 400]
+                  ].map(([nombre, monto]) => (
+                    <div key={String(nombre)} className="flex justify-between border-b pb-2">
+                      <span className="text-gray-600">{nombre}</span><strong>${Number(monto).toLocaleString("es-MX")}</strong>
+                    </div>
+                  ))}
+                  <div className="flex justify-between bg-gray-900 text-white rounded-2xl p-4">
+                    <span className="font-bold">Total fijo mensual</span><strong>$49,100</strong>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-3xl shadow-xl p-6">
+                <h3 className="text-xl font-black text-gray-800">Lectura rápida</h3>
+                <div className="mt-4 space-y-3">
+                  <div className={`rounded-2xl p-4 ${indicadores.utilidadFlujo >= 0 ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
+                    <p className="font-black">{indicadores.utilidadFlujo >= 0 ? "Flujo positivo" : "Atención: flujo negativo"}</p>
+                    <p className="text-sm mt-1">Cobros registrados menos gastos capturados durante el mes.</p>
+                  </div>
+                  <div className="bg-orange-50 text-orange-800 rounded-2xl p-4">
+                    <p className="font-black">Pendiente de cobranza</p>
+                    <p className="text-sm mt-1">Hay ${indicadores.cobrosPendientes.toLocaleString("es-MX", { minimumFractionDigits: 2 })} por recuperar en notas activas.</p>
+                  </div>
+                  <p className="text-xs text-gray-400">La utilidad mostrada es flujo estimado; todavía no descuenta automáticamente el costo individual de materiales de cada servicio.</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

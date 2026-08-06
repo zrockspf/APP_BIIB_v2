@@ -6,3 +6,14 @@ Additional references:
 * [Getting started with Vite](https://vitejs.dev/guide/)
 * [Tailwind documentation](https://tailwindcss.com/docs/installation)
 
+
+## TALLER BIIB ERP — Sprint 2
+
+Cambios incluidos:
+- Dashboard ejecutivo exclusivo para Bibi y Salvador.
+- Suni continúa con acceso operativo a remisiones y cambio de estados.
+- Indicadores de ventas, cobros, gastos, flujo, adeudos y trabajos activos.
+- Costos fijos mensuales visibles: nómina, renta, auto e internet.
+- Identidad actualizada a TALLER BIIB ERP.
+
+> Nota: el flujo disponible es una estimación de cobros menos gastos capturados. Todavía no descuenta automáticamente todos los costos variables por servicio.
