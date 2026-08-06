@@ -63,7 +63,33 @@ const configuracionInicial: ConfiguracionNegocio = {
   diasTrabajo: 26,
 };
 
-const conceptosGasto = [
+const normalizarFecha = (valor: unknown): string => {
+  if (!valor) return "";
+
+  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
+    return `${valor.getFullYear()}-${String(valor.getMonth() + 1).padStart(2, "0")}-${String(valor.getDate()).padStart(2, "0")}`;
+  }
+
+  const texto = String(valor).trim();
+  if (!texto) return "";
+
+  const iso = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const latino = texto.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (latino) {
+    return `${latino[3]}-${latino[2].padStart(2, "0")}-${latino[1].padStart(2, "0")}`;
+  }
+
+  const fecha = new Date(texto);
+  if (!Number.isNaN(fecha.getTime())) {
+    return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}-${String(fecha.getDate()).padStart(2, "0")}`;
+  }
+
+  return texto;
+};
+
+const conceptosGastoIniciales = [
   "Oro",
   "Plata",
   "Plateado",
@@ -79,7 +105,7 @@ const conceptosGasto = [
   "Publicidad",
   "Estacionamiento",
   "Otro",
-] as const;
+];
 
 
 
@@ -123,7 +149,11 @@ export default function TallerJoyeroApp() {
   const [fileInputKey, setFileInputKey] = useState(0);
 
   // --- ESTADOS FORMULARIO GASTOS ---
-  const [conceptoGasto, setConceptoGasto] = useState<(typeof conceptosGasto)[number]>("Oro");
+  const [conceptosGasto, setConceptosGasto] = useState<string[]>(() => {
+    const guardados = localStorage.getItem("taller_conceptos_gasto");
+    return guardados ? JSON.parse(guardados) : conceptosGastoIniciales;
+  });
+  const [conceptoGasto, setConceptoGasto] = useState<string>("Oro");
   const [otroConceptoGasto, setOtroConceptoGasto] = useState("");
   const [montoGasto, setMontoGasto] = useState("");
   const [metodoPagoGasto, setMetodoPagoGasto] = useState<MetodoPago>("Efectivo");
@@ -219,6 +249,18 @@ export default function TallerJoyeroApp() {
         localStorage.setItem("taller_servicios", JSON.stringify(serviciosNormalizados));
       }
 
+      if (datosNube.catalogos && typeof datosNube.catalogos === "object") {
+        const conceptosNube = Array.isArray(datosNube.catalogos.conceptosGasto)
+          ? datosNube.catalogos.conceptosGasto.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : [];
+        if (conceptosNube.length > 0) {
+          const conceptosConOtro = conceptosNube.includes("Otro") ? conceptosNube : [...conceptosNube, "Otro"];
+          setConceptosGasto(conceptosConOtro);
+          localStorage.setItem("taller_conceptos_gasto", JSON.stringify(conceptosConOtro));
+          if (!conceptosConOtro.includes(conceptoGasto)) setConceptoGasto(conceptosConOtro[0]);
+        }
+      }
+
       if (datosNube.configuracion && typeof datosNube.configuracion === "object") {
         const configuracionNube = { ...configuracionInicial, ...datosNube.configuracion };
         setConfiguracion(configuracionNube);
@@ -243,6 +285,10 @@ export default function TallerJoyeroApp() {
   useEffect(() => {
     localStorage.setItem("taller_servicios", JSON.stringify(servicios));
   }, [servicios]);
+
+  useEffect(() => {
+    localStorage.setItem("taller_conceptos_gasto", JSON.stringify(conceptosGasto));
+  }, [conceptosGasto]);
 
   useEffect(() => {
     localStorage.setItem("taller_configuracion", JSON.stringify(configuracion));
@@ -307,24 +353,41 @@ export default function TallerJoyeroApp() {
 
   // --- INDICADORES DEL DASHBOARD (SOLO ADMINISTRADORES) ---
   const indicadores = useMemo(() => {
-    const ahora = new Date();
-    const prefijoMes = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
-    const ventasHoy = ultimasRemisiones
-      .filter((r) => r.fechaRecibido === today && String(r.estado).toLowerCase() !== "cancelado")
-      .reduce((suma, r) => suma + Number(r.total || 0), 0);
+    const prefijoMes = today.slice(0, 7);
+    const remisionesValidasHoy = ultimasRemisiones.filter(
+      (r) => normalizarFecha(r.fechaRecibido) === today && String(r.estado).trim().toLowerCase() !== "cancelado"
+    );
+    const ventasHoy = remisionesValidasHoy.reduce((suma, r) => suma + Number(r.total || 0), 0);
+    const remisionesHoy = remisionesValidasHoy.length;
+
     const remisionesMes = ultimasRemisiones.filter(
-      (r) => String(r.fechaRecibido || "").startsWith(prefijoMes) && String(r.estado).toLowerCase() !== "cancelado"
+      (r) => normalizarFecha(r.fechaRecibido).startsWith(prefijoMes) && String(r.estado).trim().toLowerCase() !== "cancelado"
     );
     const ventasMes = remisionesMes.reduce((suma, r) => suma + Number(r.total || 0), 0);
     const anticiposMes = remisionesMes.reduce((suma, r) => suma + Number(r.anticipo || 0), 0);
     const cobrosPendientes = ultimasRemisiones
-      .filter((r) => !["entregado", "cancelado"].includes(String(r.estado).toLowerCase()))
+      .filter((r) => !["entregado", "cancelado"].includes(String(r.estado).trim().toLowerCase()))
       .reduce((suma, r) => suma + Number(r.saldo || 0), 0);
-    const gastosMes = historialGastos
-      .filter((g) => String(g.fecha || "").startsWith(prefijoMes))
+
+    const gastosHoy = historialGastos
+      .filter((g) => normalizarFecha(g.fecha) === today)
       .reduce((suma, g) => suma + Number(g.monto || 0), 0);
+    const gastosMes = historialGastos
+      .filter((g) => normalizarFecha(g.fecha).startsWith(prefijoMes))
+      .reduce((suma, g) => suma + Number(g.monto || 0), 0);
+
     const utilidadFlujo = anticiposMes - gastosMes;
-    return { ventasHoy, ventasMes, anticiposMes, cobrosPendientes, gastosMes, utilidadFlujo, trabajosActivos: notasActivas.length };
+    return {
+      ventasHoy,
+      remisionesHoy,
+      ventasMes,
+      anticiposMes,
+      cobrosPendientes,
+      gastosHoy,
+      gastosMes,
+      utilidadFlujo,
+      trabajosActivos: notasActivas.length,
+    };
   }, [ultimasRemisiones, historialGastos, notasActivas, today]);
 
   // --- CAPTURA Y COMPRESIÓN AUTOMÁTICA DE FOTO ---
@@ -509,7 +572,7 @@ export default function TallerJoyeroApp() {
     }
   };
 
-  // --- ENVIAR GASTO A GOOGLE SHEETS (UI Pesimista) ---
+  // --- ENVIAR GASTO A GOOGLE SHEETS (ACTUALIZACIÓN INMEDIATA) ---
   const guardarGasto = async () => {
     const conceptoFinal = conceptoGasto === "Otro" ? otroConceptoGasto.trim() : conceptoGasto;
     const montoNumero = Number(montoGasto);
@@ -518,6 +581,17 @@ export default function TallerJoyeroApp() {
       alert("❌ Selecciona un concepto y escribe una cantidad válida.");
       return;
     }
+
+    const nuevoGastoLocal: Gasto = {
+      fecha: today,
+      concepto: conceptoFinal,
+      categoria: "Pendiente de sincronizar",
+      monto: montoNumero,
+      metodoPago: metodoPagoGasto,
+    };
+
+    const respaldoGastos = [...historialGastos];
+    setHistorialGastos((actuales) => [nuevoGastoLocal, ...actuales]);
 
     const payloadGasto = {
       accion: "registrar_gasto",
@@ -532,8 +606,10 @@ export default function TallerJoyeroApp() {
       },
     };
 
-    setCargando(true);
-    
+    setMontoGasto("");
+    setOtroConceptoGasto("");
+    setMetodoPagoGasto("Efectivo");
+
     try {
       const respuesta = await fetch(URL_GOOGLE_SCRIPT, {
         method: "POST",
@@ -541,20 +617,17 @@ export default function TallerJoyeroApp() {
         body: JSON.stringify(payloadGasto),
       });
 
-      if (!respuesta.ok) throw new Error("Fallo del servidor de google");
+      if (!respuesta.ok) throw new Error("Fallo del servidor de Google");
+      const resultado = await respuesta.json();
+      if (resultado.status !== "success") throw new Error(resultado.message || "No se pudo guardar el gasto");
 
-      setConceptoGasto("Oro");
-      setOtroConceptoGasto("");
-      setMontoGasto("");
-      setMetodoPagoGasto("Efectivo");
-      await cargarDatosDesdeNube();
-      alert("✅ Gasto registrado y sincronizado para todos los dispositivos.");
-
-    } catch (e) { 
-      console.error(e); 
-      alert("❌ Error: No se pudo registrar el egreso financiero en la nube debido a tu conexión.");
-    } finally {
-      setCargando(false);
+      setHistorialGastos((actuales) => actuales.map((gasto, indice) =>
+        indice === 0 ? { ...gasto, categoria: String(resultado.categoria || "Sincronizado") } : gasto
+      ));
+    } catch (error) {
+      console.error(error);
+      setHistorialGastos(respaldoGastos);
+      alert("❌ El gasto no pudo guardarse en la nube y se retiró de la pantalla.");
     }
   };
 
@@ -620,6 +693,7 @@ export default function TallerJoyeroApp() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 ["Ventas hoy", indicadores.ventasHoy, "💰", "text-emerald-600"],
+                ["Gastos hoy", indicadores.gastosHoy, "🧾", "text-red-600"],
                 ["Ventas del mes", indicadores.ventasMes, "📈", "text-pink-600"],
                 ["Cobrado del mes", indicadores.anticiposMes, "🏦", "text-blue-600"],
                 ["Gastos del mes", indicadores.gastosMes, "💸", "text-red-600"],
@@ -634,6 +708,15 @@ export default function TallerJoyeroApp() {
                   <p className={`text-3xl font-black mt-3 ${clase}`}>${Number(valor).toLocaleString("es-MX", { minimumFractionDigits: 2 })}</p>
                 </div>
               ))}
+              <div className="bg-white rounded-3xl shadow-lg p-5 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-gray-500">Remisiones de hoy</p>
+                  <span className="text-2xl">🧾</span>
+                </div>
+                <p className="text-3xl font-black mt-3 text-indigo-600">{indicadores.remisionesHoy}</p>
+                <p className="text-xs text-gray-400 mt-2">Fecha de cálculo: {today}</p>
+              </div>
+
               <div className="bg-white rounded-3xl shadow-lg p-5 border border-gray-100">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-bold text-gray-500">Trabajos activos</p>
@@ -939,7 +1022,7 @@ export default function TallerJoyeroApp() {
                 <select
                   className="w-full border rounded-xl p-3 bg-white"
                   value={conceptoGasto}
-                  onChange={(e) => setConceptoGasto(e.target.value as (typeof conceptosGasto)[number])}
+                  onChange={(e) => setConceptoGasto(e.target.value)}
                 >
                   {conceptosGasto.map((concepto) => (
                     <option key={concepto} value={concepto}>{concepto}</option>
