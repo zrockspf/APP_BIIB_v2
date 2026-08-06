@@ -17,3 +17,8 @@ Cambios incluidos:
 - Identidad actualizada a TALLER BIIB ERP.
 
 > Nota: el flujo disponible es una estimación de cobros menos gastos capturados. Todavía no descuenta automáticamente todos los costos variables por servicio.
+
+
+## TALLER BIIB ERP v2.3 - Gastos simplificados
+
+El formulario de gastos incluye únicamente Concepto y Cantidad. Conceptos disponibles: Oro, Plata, Plateado, Broches, Soldadura, Seguetas, Herramientas taller, Gasolina, Renta, Internet, Auto, Papelería, Publicidad, Estacionamiento y Otro.

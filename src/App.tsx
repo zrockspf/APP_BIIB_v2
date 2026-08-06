@@ -58,6 +58,31 @@ const configuracionInicial: ConfiguracionNegocio = {
   diasTrabajo: 26,
 };
 
+const conceptosGasto = [
+  "Oro",
+  "Plata",
+  "Plateado",
+  "Broches",
+  "Soldadura",
+  "Seguetas",
+  "Herramientas taller",
+  "Gasolina",
+  "Renta",
+  "Internet",
+  "Auto",
+  "Papelería",
+  "Publicidad",
+  "Estacionamiento",
+  "Otro",
+] as const;
+
+const obtenerCategoriaGasto = (concepto: string) => {
+  if (["Oro", "Plata", "Plateado", "Broches", "Soldadura", "Seguetas"].includes(concepto)) return "Materiales";
+  if (["Gasolina", "Renta", "Internet", "Auto", "Estacionamiento"].includes(concepto)) return "Operación";
+  if (["Herramientas taller", "Papelería", "Publicidad"].includes(concepto)) return "Administración";
+  return "Otros";
+};
+
 const serviciosIniciales: Servicio[] = [
   { id: "cambio-broche", nombre: "Cambio de broche", precio: 65, costo: 20, activo: true },
   { id: "punto-soldadura", nombre: "Punto de soldadura", precio: 50, costo: 5, activo: true },
@@ -97,8 +122,8 @@ export default function TallerJoyeroApp() {
   const [fileInputKey, setFileInputKey] = useState(0);
 
   // --- ESTADOS FORMULARIO GASTOS ---
-  const [conceptoGasto, setConceptoGasto] = useState("");
-  const [categoriaGasto, setCategoriaGasto] = useState("Materiales");
+  const [conceptoGasto, setConceptoGasto] = useState<(typeof conceptosGasto)[number]>("Oro");
+  const [otroConceptoGasto, setOtroConceptoGasto] = useState("");
   const [montoGasto, setMontoGasto] = useState("");
 
   // --- HISTORIALES ---
@@ -380,14 +405,21 @@ export default function TallerJoyeroApp() {
 
   // --- ENVIAR GASTO A GOOGLE SHEETS (UI Pesimista) ---
   const guardarGasto = async () => {
-    if (!conceptoGasto || !montoGasto) return;
-    
+    const conceptoFinal = conceptoGasto === "Otro" ? otroConceptoGasto.trim() : conceptoGasto;
+    const montoNumero = Number(montoGasto);
+
+    if (!conceptoFinal || !montoNumero || montoNumero <= 0) {
+      alert("❌ Selecciona un concepto y escribe una cantidad válida.");
+      return;
+    }
+
+    const categoriaCalculada = obtenerCategoriaGasto(conceptoGasto);
     const payloadGasto = { 
       tipo: "nuevo_gasto",
       fecha: today, 
-      concepto: conceptoGasto, 
-      categoria: categoriaGasto, 
-      monto: Number(montoGasto) 
+      concepto: conceptoFinal, 
+      categoria: categoriaCalculada, 
+      monto: montoNumero 
     };
 
     setCargando(true);
@@ -401,9 +433,10 @@ export default function TallerJoyeroApp() {
 
       if (!respuesta.ok) throw new Error("Fallo del servidor de google");
 
-      const nuevoGastoLocal: Gasto = { fecha: today, concepto: conceptoGasto, categoria: categoriaGasto, monto: Number(montoGasto) };
+      const nuevoGastoLocal: Gasto = { fecha: today, concepto: conceptoFinal, categoria: categoriaCalculada, monto: montoNumero };
       setHistorialGastos([nuevoGastoLocal, ...historialGastos]);
-      setConceptoGasto(""); 
+      setConceptoGasto("Oro");
+      setOtroConceptoGasto("");
       setMontoGasto(""); 
       alert("✅ Gasto registrado con éxito en Google Sheets.");
 
@@ -761,15 +794,40 @@ export default function TallerJoyeroApp() {
             {/* REGISTRO DE GASTO */}
             <div className="bg-white rounded-3xl shadow-xl p-6 space-y-4 border-t-4 border-red-400">
               <h2 className="text-2xl font-semibold text-gray-800">💸 Registrar Gasto Diario</h2>
-              <input className="w-full border rounded-xl p-3" placeholder="Concepto..." value={conceptoGasto} onChange={(e) => setConceptoGasto(e.target.value)} />
-              <div className="grid grid-cols-2 gap-4">
-                <select className="w-full border rounded-xl p-3 bg-white" value={categoriaGasto} onChange={(e) => setCategoriaGasto(e.target.value)}>
-                  <option value="Materiales">Materiales</option>
-                  <option value="Herramientas">Herramientas</option>
-                  <option value="Servicios (Luz/Internet)">Servicios (Luz/Internet)</option>
-                  <option value="Otros">Otros</option>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Concepto</label>
+                <select
+                  className="w-full border rounded-xl p-3 bg-white"
+                  value={conceptoGasto}
+                  onChange={(e) => setConceptoGasto(e.target.value as (typeof conceptosGasto)[number])}
+                >
+                  {conceptosGasto.map((concepto) => (
+                    <option key={concepto} value={concepto}>{concepto}</option>
+                  ))}
                 </select>
-                <input type="number" className="w-full border rounded-xl p-3" placeholder="0.00" value={montoGasto} onChange={(e) => setMontoGasto(e.target.value)} />
+              </div>
+              {conceptoGasto === "Otro" && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Especificar concepto</label>
+                  <input
+                    className="w-full border rounded-xl p-3"
+                    placeholder="Escribe el concepto del gasto"
+                    value={otroConceptoGasto}
+                    onChange={(e) => setOtroConceptoGasto(e.target.value)}
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cantidad</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="w-full border rounded-xl p-3"
+                  placeholder="$0.00"
+                  value={montoGasto}
+                  onChange={(e) => setMontoGasto(e.target.value)}
+                />
               </div>
               <button onClick={guardarGasto} disabled={cargando} className="w-full bg-red-500 text-white rounded-2xl p-4 font-semibold">{cargando ? "⏳..." : "Registrar Egreso"}</button>
             </div>
