@@ -81,12 +81,7 @@ const conceptosGasto = [
   "Otro",
 ] as const;
 
-const obtenerCategoriaGasto = (concepto: string) => {
-  if (["Oro", "Plata", "Plateado", "Broches", "Soldadura", "Seguetas"].includes(concepto)) return "Materiales";
-  if (["Gasolina", "Renta", "Internet", "Auto", "Estacionamiento"].includes(concepto)) return "Operación";
-  if (["Herramientas taller", "Papelería", "Publicidad"].includes(concepto)) return "Administración";
-  return "Otros";
-};
+
 
 const serviciosIniciales: Servicio[] = [
   { id: "cambio-broche", nombre: "Cambio de broche", precio: 65, costo: 20, activo: true },
