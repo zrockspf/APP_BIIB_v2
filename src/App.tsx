@@ -28,6 +28,13 @@ interface Gasto {
   metodoPago?: MetodoPago;
 }
 
+interface Movimiento {
+  fecha: string;
+  tipoMovimiento: string;
+  monto: number;
+  metodoPago?: MetodoPago;
+}
+
 interface Servicio {
   id: string;
   nombre: string;
@@ -173,6 +180,11 @@ export default function TallerJoyeroApp() {
     return guardados ? JSON.parse(guardados) : [];
   });
 
+  const [movimientos, setMovimientos] = useState<Movimiento[]>(() => {
+    const guardados = localStorage.getItem("taller_movimientos");
+    return guardados ? JSON.parse(guardados) : [];
+  });
+
   const [servicios, setServicios] = useState<Servicio[]>(() => {
     const guardados = localStorage.getItem("taller_servicios");
     return guardados ? JSON.parse(guardados) : serviciosIniciales;
@@ -237,6 +249,17 @@ export default function TallerJoyeroApp() {
         localStorage.setItem("taller_gastos", JSON.stringify(gastosNormalizados));
       }
 
+      if (Array.isArray(datosNube.movimientos)) {
+        const movimientosNormalizados: Movimiento[] = datosNube.movimientos.map((m: any) => ({
+          fecha: String(m.fecha || ""),
+          tipoMovimiento: String(m.tipoMovimiento || ""),
+          monto: Number(m.monto || 0),
+          metodoPago: (m.metodoPago || "Efectivo") as MetodoPago,
+        }));
+        setMovimientos(movimientosNormalizados);
+        localStorage.setItem("taller_movimientos", JSON.stringify(movimientosNormalizados));
+      }
+
       if (Array.isArray(datosNube.servicios)) {
         const serviciosNormalizados: Servicio[] = datosNube.servicios.map((srv: any) => ({
           id: String(srv.id || srv.nombreServicio || ""),
@@ -281,6 +304,10 @@ export default function TallerJoyeroApp() {
   useEffect(() => {
     localStorage.setItem("taller_gastos", JSON.stringify(historialGastos));
   }, [historialGastos]);
+
+  useEffect(() => {
+    localStorage.setItem("taller_movimientos", JSON.stringify(movimientos));
+  }, [movimientos]);
 
   useEffect(() => {
     localStorage.setItem("taller_servicios", JSON.stringify(servicios));
@@ -360,6 +387,12 @@ export default function TallerJoyeroApp() {
     const ventasHoy = remisionesValidasHoy.reduce((suma, r) => suma + Number(r.total || 0), 0);
     const remisionesHoy = remisionesValidasHoy.length;
 
+    const tiposCobro = ["anticipo", "liquidación", "liquidacion", "ingreso adicional"];
+    const cobradoHoy = movimientos
+      .filter((m) => normalizarFecha(m.fecha) === today)
+      .filter((m) => tiposCobro.includes(String(m.tipoMovimiento).trim().toLowerCase()))
+      .reduce((suma, m) => suma + Number(m.monto || 0), 0);
+
     const remisionesMes = ultimasRemisiones.filter(
       (r) => normalizarFecha(r.fechaRecibido).startsWith(prefijoMes) && String(r.estado).trim().toLowerCase() !== "cancelado"
     );
@@ -379,6 +412,7 @@ export default function TallerJoyeroApp() {
     const utilidadFlujo = anticiposMes - gastosMes;
     return {
       ventasHoy,
+      cobradoHoy,
       remisionesHoy,
       ventasMes,
       anticiposMes,
@@ -388,7 +422,7 @@ export default function TallerJoyeroApp() {
       utilidadFlujo,
       trabajosActivos: notasActivas.length,
     };
-  }, [ultimasRemisiones, historialGastos, notasActivas, today]);
+  }, [ultimasRemisiones, historialGastos, movimientos, notasActivas, today]);
 
   // --- CAPTURA Y COMPRESIÓN AUTOMÁTICA DE FOTO ---
   const manejarCapturaFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -693,6 +727,7 @@ export default function TallerJoyeroApp() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 ["Ventas hoy", indicadores.ventasHoy, "💰", "text-emerald-600"],
+                ["Cobrado hoy", indicadores.cobradoHoy, "🏦", "text-blue-600"],
                 ["Gastos hoy", indicadores.gastosHoy, "🧾", "text-red-600"],
                 ["Ventas del mes", indicadores.ventasMes, "📈", "text-pink-600"],
                 ["Cobrado del mes", indicadores.anticiposMes, "🏦", "text-blue-600"],
