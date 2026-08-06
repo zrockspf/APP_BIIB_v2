@@ -748,22 +748,33 @@ export default function TallerJoyeroApp() {
               </div>
 
               <div className="grid sm:grid-cols-3 gap-4">
-                <input type="number" className="border rounded-xl p-3" placeholder="Anticipo $" value={anticipo} onChange={(e) => setAnticipo(e.target.value)} />
-                <select
-                  className="border rounded-xl p-3 bg-white text-sm"
-                  value={metodoPagoAnticipo}
-                  onChange={(e) => setMetodoPagoAnticipo(e.target.value as MetodoPago)}
-                  disabled={Number(anticipo || 0) <= 0}
-                >
-                  <option value="Efectivo">Efectivo</option>
-                  <option value="Transferencia">Transferencia</option>
-                </select>
-                <select className="border rounded-xl p-3 bg-white text-sm" value={estado} onChange={(e) => setEstado(e.target.value)}>
-                  <option value="en proceso">En Proceso</option>
-                  <option value="listo">Listo</option>
-                  <option value="entregado">Entregado</option>
-                  <option value="cancelado">Cancelado</option>
-                </select>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Anticipo</label>
+                  <input type="number" min="0" className="w-full border rounded-xl p-3" placeholder="$0.00" value={anticipo} onChange={(e) => setAnticipo(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Método de pago</label>
+                  <select
+                    className="w-full border rounded-xl p-3 bg-white text-sm"
+                    value={metodoPagoAnticipo}
+                    onChange={(e) => setMetodoPagoAnticipo(e.target.value as MetodoPago)}
+                  >
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="Transferencia">🏦 Transferencia</option>
+                  </select>
+                  {Number(anticipo || 0) <= 0 && (
+                    <p className="text-[11px] text-gray-400 mt-1">Se aplicará cuando captures un anticipo.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Estado</label>
+                  <select className="w-full border rounded-xl p-3 bg-white text-sm" value={estado} onChange={(e) => setEstado(e.target.value)}>
+                    <option value="en proceso">En Proceso</option>
+                    <option value="listo">Listo</option>
+                    <option value="entregado">Entregado</option>
+                    <option value="cancelado">Cancelado</option>
+                  </select>
+                </div>
               </div>
 
               <button onClick={guardarRemision} disabled={cargando} className="w-full bg-pink-500 text-white rounded-2xl p-4 font-semibold">
