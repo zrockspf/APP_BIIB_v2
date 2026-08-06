@@ -159,14 +159,35 @@ export default function TallerJoyeroApp() {
   const cargarDatosDesdeNube = async () => {
     setCargando(true);
     try {
-      const respuesta = await fetch(URL_GOOGLE_SCRIPT);
+      const respuesta = await fetch(`${URL_GOOGLE_SCRIPT}?tipo=sincronizar_completo&_=${Date.now()}`);
+      if (!respuesta.ok) throw new Error("No se pudo consultar Google Sheets");
       const datosNube = await respuesta.json();
+
+      // Compatibilidad con la versión anterior del Apps Script, que devolvía solo remisiones.
       if (Array.isArray(datosNube)) {
         setUltimasRemisiones(datosNube);
         localStorage.setItem("taller_remisiones", JSON.stringify(datosNube));
+        return;
+      }
+
+      if (Array.isArray(datosNube.remisiones)) {
+        setUltimasRemisiones(datosNube.remisiones);
+        localStorage.setItem("taller_remisiones", JSON.stringify(datosNube.remisiones));
+      }
+
+      if (Array.isArray(datosNube.gastos)) {
+        setHistorialGastos(datosNube.gastos);
+        localStorage.setItem("taller_gastos", JSON.stringify(datosNube.gastos));
+      }
+
+      if (datosNube.configuracion && typeof datosNube.configuracion === "object") {
+        const configuracionNube = { ...configuracionInicial, ...datosNube.configuracion };
+        setConfiguracion(configuracionNube);
+        localStorage.setItem("taller_configuracion", JSON.stringify(configuracionNube));
       }
     } catch (error) {
       console.error("Error sincronizando con Google Sheets:", error);
+      alert("⚠️ No se pudo sincronizar con la nube. Se conservarán temporalmente los datos de este dispositivo.");
     } finally {
       setCargando(false);
     }
@@ -194,6 +215,32 @@ export default function TallerJoyeroApp() {
   [configuracion]);
 
   const puntoEquilibrioDiario = totalGastosFijos / Math.max(configuracion.diasTrabajo, 1);
+
+  const guardarConfiguracionEnNube = async () => {
+    setCargando(true);
+    try {
+      const respuesta = await fetch(URL_GOOGLE_SCRIPT, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "guardar_configuracion",
+          configuracion,
+          usuario,
+        }),
+      });
+      if (!respuesta.ok) throw new Error("No se pudo guardar la configuración");
+      const resultado = await respuesta.json();
+      if (resultado.status !== "success") throw new Error(resultado.message || "Error del servidor");
+      localStorage.setItem("taller_configuracion", JSON.stringify(configuracion));
+      alert("✅ Configuración guardada y sincronizada para todos los dispositivos.");
+      await cargarDatosDesdeNube();
+    } catch (error) {
+      console.error(error);
+      alert("❌ No se pudo guardar la configuración en la nube.");
+    } finally {
+      setCargando(false);
+    }
+  };
 
   // --- CONTROL DINÁMICO DE FOLIOS ---
   const [folioActual, setFolioActual] = useState("0001");
@@ -419,7 +466,9 @@ export default function TallerJoyeroApp() {
       fecha: today, 
       concepto: conceptoFinal, 
       categoria: categoriaCalculada, 
-      monto: montoNumero 
+      monto: montoNumero,
+      hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
+      usuario
     };
 
     setCargando(true);
@@ -433,12 +482,11 @@ export default function TallerJoyeroApp() {
 
       if (!respuesta.ok) throw new Error("Fallo del servidor de google");
 
-      const nuevoGastoLocal: Gasto = { fecha: today, concepto: conceptoFinal, categoria: categoriaCalculada, monto: montoNumero };
-      setHistorialGastos([nuevoGastoLocal, ...historialGastos]);
       setConceptoGasto("Oro");
       setOtroConceptoGasto("");
-      setMontoGasto(""); 
-      alert("✅ Gasto registrado con éxito en Google Sheets.");
+      setMontoGasto("");
+      await cargarDatosDesdeNube();
+      alert("✅ Gasto registrado y sincronizado para todos los dispositivos.");
 
     } catch (e) { 
       console.error(e); 
@@ -783,7 +831,14 @@ export default function TallerJoyeroApp() {
                 <p className="text-3xl font-black mt-2">${puntoEquilibrioDiario.toLocaleString("es-MX", { maximumFractionDigits: 0 })}</p>
               </div>
             </div>
-            <p className="text-xs text-gray-400">La configuración se guarda en este navegador. En una siguiente versión la sincronizaremos en la nube para compartirla entre dispositivos.</p>
+            <button
+              onClick={guardarConfiguracionEnNube}
+              disabled={cargando}
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold px-6 py-3 rounded-2xl"
+            >
+              {cargando ? "⏳ Guardando..." : "☁️ Guardar configuración para todos"}
+            </button>
+            <p className="text-xs text-gray-400">La configuración se guarda en Google Sheets y se descarga al iniciar sesión o al presionar Sincronizar.</p>
           </div>
         )}
 

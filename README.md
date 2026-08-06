@@ -22,3 +22,12 @@ Cambios incluidos:
 ## TALLER BIIB ERP v2.3 - Gastos simplificados
 
 El formulario de gastos incluye únicamente Concepto y Cantidad. Conceptos disponibles: Oro, Plata, Plateado, Broches, Soldadura, Seguetas, Herramientas taller, Gasolina, Renta, Internet, Auto, Papelería, Publicidad, Estacionamiento y Otro.
+
+## TALLER BIIB ERP v2.4 — Sincronización multidispositivo
+
+- Gastos se descargan desde Google Sheets al iniciar sesión y al presionar Sincronizar.
+- Después de registrar un gasto, la app vuelve a consultar la nube.
+- Configuración del negocio incorpora un botón para guardarla en Google Sheets.
+- Se incluye `GOOGLE_APPS_SCRIPT_SINCRONIZACION.gs` con las funciones necesarias para actualizar el Apps Script existente.
+
+La app mantiene compatibilidad con el Apps Script anterior: si el GET devuelve solamente un arreglo, seguirá cargando remisiones. Para sincronizar gastos y configuración es obligatorio actualizar y volver a desplegar Google Apps Script.
