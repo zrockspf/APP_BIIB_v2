@@ -31,12 +31,32 @@ interface Servicio {
   activo: boolean;
 }
 
+interface ConfiguracionNegocio {
+  sueldoBibi: number;
+  sueldoSalvador: number;
+  sueldoSuni: number;
+  renta: number;
+  auto: number;
+  internet: number;
+  diasTrabajo: number;
+}
+
 // Base de datos local de usuarios con sus respectivos roles
 const usuarios = [
   { usuario: "Bibi", password: "Bibi01", rol: "admin" },
   { usuario: "Salvador", password: "Salvador01", rol: "admin" },
   { usuario: "Suni", password: "123456", rol: "vendedor" },
 ];
+
+const configuracionInicial: ConfiguracionNegocio = {
+  sueldoBibi: 18000,
+  sueldoSalvador: 13000,
+  sueldoSuni: 13000,
+  renta: 11000,
+  auto: 13000,
+  internet: 400,
+  diasTrabajo: 26,
+};
 
 const serviciosIniciales: Servicio[] = [
   { id: "cambio-broche", nombre: "Cambio de broche", precio: 65, costo: 20, activo: true },
@@ -99,6 +119,11 @@ export default function TallerJoyeroApp() {
 
   const [servicioSeleccionado, setServicioSeleccionado] = useState("");
 
+  const [configuracion, setConfiguracion] = useState<ConfiguracionNegocio>(() => {
+    const guardada = localStorage.getItem("taller_configuracion");
+    return guardada ? { ...configuracionInicial, ...JSON.parse(guardada) } : configuracionInicial;
+  });
+
   // --- EFECTO DE DESCARGA MULTIDISPOSITIVO ---
   useEffect(() => {
     if (sesionIniciada) {
@@ -133,6 +158,17 @@ export default function TallerJoyeroApp() {
   useEffect(() => {
     localStorage.setItem("taller_servicios", JSON.stringify(servicios));
   }, [servicios]);
+
+  useEffect(() => {
+    localStorage.setItem("taller_configuracion", JSON.stringify(configuracion));
+  }, [configuracion]);
+
+  const totalGastosFijos = useMemo(() =>
+    configuracion.sueldoBibi + configuracion.sueldoSalvador + configuracion.sueldoSuni +
+    configuracion.renta + configuracion.auto + configuracion.internet,
+  [configuracion]);
+
+  const puntoEquilibrioDiario = totalGastosFijos / Math.max(configuracion.diasTrabajo, 1);
 
   // --- CONTROL DINÁMICO DE FOLIOS ---
   const [folioActual, setFolioActual] = useState("0001");
@@ -425,6 +461,7 @@ export default function TallerJoyeroApp() {
             <button onClick={() => setVistaAdmin("remisiones")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "remisiones" ? "bg-pink-500 text-white" : "bg-white"}`}>📋 Remisiones</button>
             <button onClick={() => setVistaAdmin("gastos")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "gastos" ? "bg-red-500 text-white" : "bg-white"}`}>💸 Gastos</button>
             <button onClick={() => setVistaAdmin("servicios")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "servicios" ? "bg-purple-500 text-white" : "bg-white"}`}>🛠 Servicios</button>
+            <button onClick={() => setVistaAdmin("configuracion")} className={`px-5 py-2.5 rounded-xl font-semibold ${vistaAdmin === "configuracion" ? "bg-blue-600 text-white" : "bg-white"}`}>⚙️ Configuración</button>
           </div>
         )}
 
@@ -468,15 +505,22 @@ export default function TallerJoyeroApp() {
                 <h3 className="text-xl font-black text-gray-800">Costos fijos mensuales</h3>
                 <div className="mt-4 space-y-3 text-sm">
                   {[
-                    ["Nómina Suni", 13000], ["Nómina Salvador", 13000], ["Renta", 9700],
-                    ["Arrendamiento del auto", 13000], ["Internet", 400]
+                    ["Sueldo Bibi", configuracion.sueldoBibi],
+                    ["Sueldo Salvador", configuracion.sueldoSalvador],
+                    ["Sueldo Suni", configuracion.sueldoSuni],
+                    ["Renta", configuracion.renta],
+                    ["Arrendamiento del auto", configuracion.auto],
+                    ["Internet", configuracion.internet]
                   ].map(([nombre, monto]) => (
                     <div key={String(nombre)} className="flex justify-between border-b pb-2">
                       <span className="text-gray-600">{nombre}</span><strong>${Number(monto).toLocaleString("es-MX")}</strong>
                     </div>
                   ))}
                   <div className="flex justify-between bg-gray-900 text-white rounded-2xl p-4">
-                    <span className="font-bold">Total fijo mensual</span><strong>$49,100</strong>
+                    <span className="font-bold">Total fijo mensual</span><strong>${totalGastosFijos.toLocaleString("es-MX")}</strong>
+                  </div>
+                  <div className="flex justify-between bg-blue-50 text-blue-900 rounded-2xl p-4">
+                    <span className="font-bold">Meta mínima diaria</span><strong>${puntoEquilibrioDiario.toLocaleString("es-MX", { maximumFractionDigits: 0 })}</strong>
                   </div>
                 </div>
               </div>
@@ -660,6 +704,54 @@ export default function TallerJoyeroApp() {
             </div>
 
           </div> 
+        )}
+
+
+
+        {/* CONFIGURACIÓN DEL NEGOCIO (SOLO ADMIN) */}
+        {rol === "admin" && vistaAdmin === "configuracion" && (
+          <div className="bg-white rounded-3xl shadow-xl p-6 space-y-6">
+            <div>
+              <h2 className="text-2xl font-black text-gray-800">⚙️ Configuración del negocio</h2>
+              <p className="text-sm text-gray-500 mt-1">Estos valores actualizan automáticamente el Dashboard y el punto de equilibrio.</p>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[
+                ["Sueldo Bibi", "sueldoBibi"],
+                ["Sueldo Salvador", "sueldoSalvador"],
+                ["Sueldo Suni", "sueldoSuni"],
+                ["Renta mensual", "renta"],
+                ["Arrendamiento del auto", "auto"],
+                ["Internet", "internet"],
+                ["Días de trabajo", "diasTrabajo"],
+              ].map(([etiqueta, campo]) => (
+                <label key={campo} className="block bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                  <span className="block text-sm font-bold text-gray-600 mb-2">{etiqueta}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    className="w-full border rounded-xl p-3 bg-white font-bold"
+                    value={configuracion[campo as keyof ConfiguracionNegocio]}
+                    onChange={(e) => setConfiguracion((actual) => ({
+                      ...actual,
+                      [campo]: Math.max(0, Number(e.target.value || 0)),
+                    }))}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="rounded-2xl bg-gray-900 text-white p-5">
+                <p className="text-sm opacity-70">Gastos fijos mensuales</p>
+                <p className="text-3xl font-black mt-2">${totalGastosFijos.toLocaleString("es-MX")}</p>
+              </div>
+              <div className="rounded-2xl bg-blue-600 text-white p-5">
+                <p className="text-sm opacity-80">Punto de equilibrio diario</p>
+                <p className="text-3xl font-black mt-2">${puntoEquilibrioDiario.toLocaleString("es-MX", { maximumFractionDigits: 0 })}</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">La configuración se guarda en este navegador. En una siguiente versión la sincronizaremos en la nube para compartirla entre dispositivos.</p>
+          </div>
         )}
 
         {/* SECCIÓN GASTOS (SOLO ADMIN) */}
