@@ -14,13 +14,18 @@ interface Remision {
   saldo: number;
   estado: string;
   foto: string;
+  metodoPagoAnticipo?: MetodoPago;
+  metodoPagoLiquidacion?: MetodoPago;
 }
+
+type MetodoPago = "Efectivo" | "Transferencia";
 
 interface Gasto {
   fecha: string;
   concepto: string;
   categoria: string;
   monto: number;
+  metodoPago?: MetodoPago;
 }
 
 interface Servicio {
@@ -115,6 +120,7 @@ export default function TallerJoyeroApp() {
   const [trabajo, setTrabajo] = useState("");
   const [cantidadPiezas, setCantidadPiezas] = useState("");
   const [anticipo, setAnticipo] = useState("");
+  const [metodoPagoAnticipo, setMetodoPagoAnticipo] = useState<MetodoPago>("Efectivo");
   const [total, setTotal] = useState("");
   const [estado, setEstado] = useState("en proceso");
   const [fotoPieza, setFotoPieza] = useState("");
@@ -125,6 +131,11 @@ export default function TallerJoyeroApp() {
   const [conceptoGasto, setConceptoGasto] = useState<(typeof conceptosGasto)[number]>("Oro");
   const [otroConceptoGasto, setOtroConceptoGasto] = useState("");
   const [montoGasto, setMontoGasto] = useState("");
+  const [metodoPagoGasto, setMetodoPagoGasto] = useState<MetodoPago>("Efectivo");
+
+  // --- LIQUIDACIÓN AL ENTREGAR ---
+  const [entregaPendiente, setEntregaPendiente] = useState<Remision | null>(null);
+  const [metodoPagoEntrega, setMetodoPagoEntrega] = useState<MetodoPago>("Efectivo");
 
   // --- HISTORIALES ---
   const [ultimasRemisiones, setUltimasRemisiones] = useState<Remision[]>(() => {
@@ -362,6 +373,7 @@ export default function TallerJoyeroApp() {
       cantidadPiezas: Number(cantidadPiezas || 1),
       total: totalNum,
       anticipo: anticipoNum,
+      metodoPagoAnticipo: anticipoNum > 0 ? metodoPagoAnticipo : "",
       saldo: saldoCalculado,
       estado,
       foto: fotoPieza
@@ -379,6 +391,14 @@ export default function TallerJoyeroApp() {
       const resultado = await respuesta.json();
 
       if (resultado.status === "success") {
+        if (anticipoNum > 0) {
+          void registrarMovimientoPago({
+            folio: folioAGuardar,
+            tipoMovimiento: "Anticipo",
+            monto: anticipoNum,
+            metodoPago: metodoPagoAnticipo,
+          });
+        }
         alert(`✅ Nota #${folioAGuardar} guardada en la nube y foto procesada.`);
         setFileInputKey(prev => prev + 1);
         await cargarDatosDesdeNube();
@@ -392,19 +412,54 @@ export default function TallerJoyeroApp() {
       const copiaTemporal: Remision = { ...datos, cantidadPiezas: datos.cantidadPiezas };
       setUltimasRemisiones([copiaTemporal, ...ultimasRemisiones]);
     } finally {
-      setCliente(""); setCelular(""); setTrabajo(""); setCantidadPiezas(""); setAnticipo(""); setTotal(""); setEstado("en proceso"); setFotoPieza(""); setFechaRecibido(today); setFechaEntrega("");
+      setCliente(""); setCelular(""); setTrabajo(""); setCantidadPiezas(""); setAnticipo(""); setMetodoPagoAnticipo("Efectivo"); setTotal(""); setEstado("en proceso"); setFotoPieza(""); setFechaRecibido(today); setFechaEntrega("");
       setCargando(false);
     }
   };
 
+  const registrarMovimientoPago = async ({
+    folio,
+    tipoMovimiento,
+    monto,
+    metodoPago,
+  }: {
+    folio: string;
+    tipoMovimiento: "Anticipo" | "Liquidación";
+    monto: number;
+    metodoPago: MetodoPago;
+  }) => {
+    try {
+      await fetch(URL_GOOGLE_SCRIPT, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "nuevo_movimiento_pago",
+          fecha: today,
+          hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
+          usuario,
+          folio,
+          tipoMovimiento,
+          monto,
+          metodoPago,
+        }),
+      });
+    } catch (error) {
+      console.error("No se pudo registrar el movimiento de pago:", error);
+    }
+  };
+
   // --- ACTUALIZAR EL ESTATUS DE UNA ORDEN EXISTENTE CON ROLLBACK SEGURO ---
-  const actualizarEstatusFila = async (folio: string, nuevoEstado: string) => {
+  const actualizarEstatusFila = async (folio: string, nuevoEstado: string, metodoLiquidacion?: MetodoPago) => {
     let anticipoActualizado: number | null = null;
     let saldoActualizado: number | null = null;
 
-    if (nuevoEstado === "entregado") {
-      const confirmar = confirm(`¿Confirmas que la nota #${folio} ha sido ENTREGADA? Se registrará como PAGADA (Saldo $0) y se cerrará en esta pantalla.`);
-      if (!confirmar) return;
+    if (nuevoEstado === "entregado" && !metodoLiquidacion) {
+      const remision = ultimasRemisiones.find((item) => item.folio === folio);
+      if (remision) {
+        setEntregaPendiente(remision);
+        setMetodoPagoEntrega("Efectivo");
+      }
+      return;
     }
 
     const respaldoRemisionesSeguras = [...ultimasRemisiones];
@@ -414,7 +469,7 @@ export default function TallerJoyeroApp() {
         if (nuevoEstado === "entregado") {
           anticipoActualizado = Number(rem.total);
           saldoActualizado = 0;
-          return { ...rem, estado: nuevoEstado, anticipo: anticipoActualizado, saldo: saldoActualizado };
+          return { ...rem, estado: nuevoEstado, anticipo: anticipoActualizado, saldo: saldoActualizado, metodoPagoLiquidacion: metodoLiquidacion };
         }
         return { ...rem, estado: nuevoEstado };
       }
@@ -437,11 +492,26 @@ export default function TallerJoyeroApp() {
           estado: nuevoEstado === "entregado" ? "Entregado" : nuevoEstado,
           completarPago: nuevoEstado === "entregado",
           anticipo: anticipoActualizado,
-          saldo: saldoActualizado
+          saldo: saldoActualizado,
+          metodoPagoLiquidacion: metodoLiquidacion || ""
         }),
       });
 
       if (!respuesta.ok) throw new Error("Error de respuesta del servidor");
+
+      if (nuevoEstado === "entregado" && metodoLiquidacion) {
+        const remisionOriginal = respaldoRemisionesSeguras.find((item) => item.folio === folio);
+        const liquidacion = Number(remisionOriginal?.saldo || 0);
+        if (liquidacion > 0) {
+          void registrarMovimientoPago({
+            folio,
+            tipoMovimiento: "Liquidación",
+            monto: liquidacion,
+            metodoPago: metodoLiquidacion,
+          });
+        }
+        setEntregaPendiente(null);
+      }
 
     } catch (error) {
       console.error("Error al actualizar estatus en la nube:", error);
@@ -467,6 +537,7 @@ export default function TallerJoyeroApp() {
       concepto: conceptoFinal, 
       categoria: categoriaCalculada, 
       monto: montoNumero,
+      metodoPago: metodoPagoGasto,
       hora: new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }),
       usuario
     };
@@ -485,6 +556,7 @@ export default function TallerJoyeroApp() {
       setConceptoGasto("Oro");
       setOtroConceptoGasto("");
       setMontoGasto("");
+      setMetodoPagoGasto("Efectivo");
       await cargarDatosDesdeNube();
       alert("✅ Gasto registrado y sincronizado para todos los dispositivos.");
 
@@ -685,8 +757,17 @@ export default function TallerJoyeroApp() {
                 <input type="number" className="border rounded-xl p-3" placeholder="Total $" value={total} onChange={(e) => setTotal(e.target.value)} />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-3 gap-4">
                 <input type="number" className="border rounded-xl p-3" placeholder="Anticipo $" value={anticipo} onChange={(e) => setAnticipo(e.target.value)} />
+                <select
+                  className="border rounded-xl p-3 bg-white text-sm"
+                  value={metodoPagoAnticipo}
+                  onChange={(e) => setMetodoPagoAnticipo(e.target.value as MetodoPago)}
+                  disabled={Number(anticipo || 0) <= 0}
+                >
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Transferencia">Transferencia</option>
+                </select>
                 <select className="border rounded-xl p-3 bg-white text-sm" value={estado} onChange={(e) => setEstado(e.target.value)}>
                   <option value="en proceso">En Proceso</option>
                   <option value="listo">Listo</option>
@@ -774,6 +855,9 @@ export default function TallerJoyeroApp() {
                             <p className="text-sm font-black text-gray-900 mt-0.5">
                               ${Number(rem.total || 0).toFixed(2)}
                             </p>
+                            {rem.metodoPagoAnticipo && Number(rem.anticipo || 0) > 0 && (
+                              <p className="text-[10px] text-gray-400 mt-1">Anticipo: {rem.metodoPagoAnticipo}</p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -884,6 +968,17 @@ export default function TallerJoyeroApp() {
                   onChange={(e) => setMontoGasto(e.target.value)}
                 />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Método de pago</label>
+                <select
+                  className="w-full border rounded-xl p-3 bg-white"
+                  value={metodoPagoGasto}
+                  onChange={(e) => setMetodoPagoGasto(e.target.value as MetodoPago)}
+                >
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Transferencia">Transferencia</option>
+                </select>
+              </div>
               <button onClick={guardarGasto} disabled={cargando} className="w-full bg-red-500 text-white rounded-2xl p-4 font-semibold">{cargando ? "⏳..." : "Registrar Egreso"}</button>
             </div>
             
@@ -896,6 +991,7 @@ export default function TallerJoyeroApp() {
                     <div>
                       <p className="font-bold text-gray-800">{gas.concepto}</p>
                       <p className="text-xs text-gray-400">📅 {gas.fecha}</p>
+                      <p className="text-xs text-gray-400">{gas.metodoPago === "Transferencia" ? "🏦" : "💵"} {gas.metodoPago || "Sin especificar"}</p>
                     </div>
                     <p className="text-red-500 font-bold">-${gas.monto}</p>
                   </div>
@@ -962,6 +1058,52 @@ export default function TallerJoyeroApp() {
           </div>
         )}
 
+
+        {entregaPendiente && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-5">
+              <div>
+                <h3 className="text-2xl font-black text-gray-900">Confirmar entrega</h3>
+                <p className="text-sm text-gray-500 mt-1">Nota #{entregaPendiente.folio} · {entregaPendiente.cliente}</p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs font-bold text-gray-500 uppercase">Saldo a liquidar</p>
+                <p className="text-3xl font-black text-gray-900 mt-1">${Number(entregaPendiente.saldo || 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Método de pago</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["Efectivo", "Transferencia"] as MetodoPago[]).map((metodo) => (
+                    <button
+                      key={metodo}
+                      type="button"
+                      onClick={() => setMetodoPagoEntrega(metodo)}
+                      className={`rounded-2xl border p-4 font-bold ${metodoPagoEntrega === metodo ? "bg-pink-500 text-white border-pink-500" : "bg-white text-gray-700 border-gray-200"}`}
+                    >
+                      {metodo === "Efectivo" ? "💵 Efectivo" : "🏦 Transferencia"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEntregaPendiente(null)}
+                  className="rounded-2xl bg-gray-100 text-gray-700 p-3 font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => actualizarEstatusFila(entregaPendiente.folio, "entregado", metodoPagoEntrega)}
+                  className="rounded-2xl bg-green-600 text-white p-3 font-bold"
+                >
+                  Confirmar entrega
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
