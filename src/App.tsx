@@ -191,6 +191,7 @@ export default function TallerJoyeroApp() {
   });
 
   const [servicioSeleccionado, setServicioSeleccionado] = useState("");
+  const [serviciosAgregados, setServiciosAgregados] = useState<Servicio[]>([]);
 
   const [configuracion, setConfiguracion] = useState<ConfiguracionNegocio>(() => {
     const guardada = localStorage.getItem("taller_configuracion");
@@ -477,45 +478,34 @@ export default function TallerJoyeroApp() {
 
   // --- ENVIAR REMISIÓN NUEVA A GOOGLE SHEETS ---
   const guardarRemision = async () => {
-    if (!cliente.trim() || !trabajo.trim() || !total) {
+    if (!cliente || !trabajo || !total) {
       alert("❌ Por favor llena los campos obligatorios: Cliente, Trabajo y Total.");
       return;
     }
 
     const totalNum = Number(total || 0);
     const anticipoNum = Number(anticipo || 0);
+    const saldoCalculado = totalNum - anticipoNum;
+    const folioAGuardar = folioActual;
 
-    if (!Number.isFinite(totalNum) || totalNum <= 0) {
-      alert("❌ El total debe ser una cantidad válida mayor a cero.");
-      return;
-    }
-
-    if (!Number.isFinite(anticipoNum) || anticipoNum < 0 || anticipoNum > totalNum) {
-      alert("❌ El anticipo debe ser una cantidad válida entre $0 y el total de la nota.");
-      return;
-    }
-
-    const saldoCalculado = Math.max(0, totalNum - anticipoNum);
-    const folioAGuardar = folioActual.trim();
-
-    const payload = {
+    const datos = {
       accion: "crear_remision",
       datos: {
-        folio: folioAGuardar,
-        fechaRecibido,
-        fechaEntrega,
-        cliente: cliente.trim(),
-        celular: celular.trim(),
-        trabajo: trabajo.trim(),
-        cantidadPiezas: Math.max(1, Number(cantidadPiezas || 1)),
-        total: totalNum,
-        anticipo: anticipoNum,
-        metodoPago: anticipoNum > 0 ? metodoPagoAnticipo : "Efectivo",
-        saldo: saldoCalculado,
-        estado: "En Proceso",
-        foto: fotoPieza,
-        usuario,
-      },
+      folio: folioAGuardar,
+      fechaRecibido,
+      fechaEntrega,
+      cliente,
+      celular,
+      trabajo,
+      cantidadPiezas: Number(cantidadPiezas || 1),
+      total: totalNum,
+      anticipo: anticipoNum,
+      metodoPago: anticipoNum > 0 ? metodoPagoAnticipo : "Efectivo",
+      saldo: saldoCalculado,
+      estado: "En Proceso",
+      foto: fotoPieza,
+      usuario
+      }
     };
 
     setCargando(true);
@@ -523,55 +513,31 @@ export default function TallerJoyeroApp() {
     try {
       const respuesta = await fetch(URL_GOOGLE_SCRIPT, {
         method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify(payload),
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(datos),
       });
+      
+      const resultado = await respuesta.json();
 
-      const textoRespuesta = await respuesta.text();
-
-      if (!respuesta.ok) {
-        throw new Error(
-          `Error HTTP ${respuesta.status}: ${textoRespuesta.slice(0, 300)}`
-        );
+      if (resultado.status === "success") {
+        alert(`✅ Nota #${folioAGuardar} guardada en la nube.`);
+        setFileInputKey(prev => prev + 1);
+        await cargarDatosDesdeNube();
+      } else {
+        throw new Error(resultado.message || "Error desconocido en el servidor");
       }
 
-      let resultado: { status?: string; message?: string };
-
-      try {
-        resultado = JSON.parse(textoRespuesta);
-      } catch {
-        throw new Error(
-          "El servidor respondió con un formato no válido: " +
-            textoRespuesta.slice(0, 300)
-        );
-      }
-
-      if (resultado.status !== "success") {
-        throw new Error(resultado.message || "El servidor no confirmó el guardado.");
-      }
-
-      alert(`✅ Nota #${folioAGuardar} guardada correctamente en la nube.`);
-      setFileInputKey((valorActual) => valorActual + 1);
-
-      // El guardado ya fue confirmado. Una falla al refrescar la pantalla
-      // no debe mostrarse como si la nota no se hubiera guardado.
-      void cargarDatosDesdeNube();
-    } catch (error: unknown) {
-      console.error("Error real al guardar la remisión:", error);
-
-      const mensajeError =
-        error instanceof Error ? error.message : "Error desconocido al guardar.";
-
+    } catch (error: any) {
+      console.error(error);
+      alert("⚠️ Error de guardado asíncrono. Registrando copia local temporal.");
       const copiaTemporal: Remision = {
         folio: folioAGuardar,
         fechaRecibido,
         fechaEntrega,
-        cliente: cliente.trim(),
-        celular: celular.trim(),
-        trabajo: trabajo.trim(),
-        cantidadPiezas: Math.max(1, Number(cantidadPiezas || 1)),
+        cliente,
+        celular,
+        trabajo,
+        cantidadPiezas: Number(cantidadPiezas || 1),
         total: totalNum,
         anticipo: anticipoNum,
         saldo: saldoCalculado,
@@ -579,32 +545,9 @@ export default function TallerJoyeroApp() {
         foto: fotoPieza,
         metodoPagoAnticipo,
       };
-
-      setUltimasRemisiones((actuales) => {
-        const yaExiste = actuales.some(
-          (remision) => String(remision.folio) === String(folioAGuardar)
-        );
-
-        return yaExiste ? actuales : [copiaTemporal, ...actuales];
-      });
-
-      alert(
-        "⚠️ No se pudo confirmar el guardado en la nube.\n\n" +
-          mensajeError +
-          "\n\nSe conservó una copia local temporal."
-      );
+      setUltimasRemisiones([copiaTemporal, ...ultimasRemisiones]);
     } finally {
-      setCliente("");
-      setCelular("");
-      setTrabajo("");
-      setCantidadPiezas("");
-      setAnticipo("");
-      setMetodoPagoAnticipo("Efectivo");
-      setTotal("");
-      setEstado("en proceso");
-      setFotoPieza("");
-      setFechaRecibido(today);
-      setFechaEntrega("");
+      setCliente(""); setCelular(""); setTrabajo(""); setCantidadPiezas(""); setAnticipo(""); setMetodoPagoAnticipo("Efectivo"); setTotal(""); setEstado("en proceso"); setFotoPieza(""); setFechaRecibido(today); setFechaEntrega(""); setServiciosAgregados([]); setServicioSeleccionado("");
       setCargando(false);
     }
   };
@@ -893,24 +836,75 @@ export default function TallerJoyeroApp() {
 
               <input className="w-full border rounded-xl p-3" placeholder="Nombre del cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
               <input className="w-full border rounded-xl p-3" placeholder="Número de celular" value={celular} onChange={(e) => setCelular(e.target.value)} />
-              <select
-                className="w-full border rounded-xl p-3 bg-white"
-                value={servicioSeleccionado}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setServicioSeleccionado(id);
-                  const servicio = servicios.find((item) => item.id === id);
-                  if (servicio) {
-                    setTrabajo(servicio.nombre);
-                    setTotal(String(servicio.precio));
-                  }
-                }}
-              >
-                <option value="">Seleccionar servicio (opcional)</option>
-                {servicios.filter((item) => item.activo).map((item) => (
-                  <option key={item.id} value={item.id}>{item.nombre} — ${item.precio.toFixed(2)}</option>
-                ))}
-              </select>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <select
+                    className="flex-1 min-w-0 border rounded-xl p-3 bg-white"
+                    value={servicioSeleccionado}
+                    onChange={(e) => setServicioSeleccionado(e.target.value)}
+                  >
+                    <option value="">Seleccionar servicio (opcional)</option>
+                    {servicios.filter((item) => item.activo).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.nombre} — ${item.precio.toFixed(2)}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    disabled={!servicioSeleccionado}
+                    className="shrink-0 bg-purple-500 hover:bg-purple-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 rounded-xl font-bold"
+                    onClick={() => {
+                      const servicio = servicios.find((item) => item.id === servicioSeleccionado);
+                      if (!servicio) return;
+
+                      setServiciosAgregados((actuales) => [...actuales, servicio]);
+                      setTrabajo((actual) => actual.trim() ? `${actual.trim()}\n${servicio.nombre}` : servicio.nombre);
+                      setTotal((actual) => String(Number(actual || 0) + Number(servicio.precio || 0)));
+                      setCantidadPiezas((actual) => String(Number(actual || 0) + 1));
+                      setServicioSeleccionado("");
+                    }}
+                  >
+                    + Agregar
+                  </button>
+                </div>
+
+                {serviciosAgregados.length > 0 && (
+                  <div className="space-y-2 rounded-2xl border border-purple-100 bg-purple-50/50 p-3">
+                    <p className="text-xs font-bold uppercase text-purple-600">Servicios agregados</p>
+                    {serviciosAgregados.map((servicio, index) => (
+                      <div
+                        key={`${servicio.id}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-white border border-purple-100 p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-800 truncate">{servicio.nombre}</p>
+                          <p className="text-sm text-purple-600">${servicio.precio.toFixed(2)}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-lg px-3 py-1.5 font-bold text-red-500 hover:bg-red-50"
+                          onClick={() => {
+                            setServiciosAgregados((actuales) => actuales.filter((_, i) => i !== index));
+                            setTrabajo((actual) => {
+                              const lineas = actual.split("\n");
+                              const indiceLinea = lineas.findIndex((linea) => linea.trim() === servicio.nombre.trim());
+                              if (indiceLinea !== -1) lineas.splice(indiceLinea, 1);
+                              return lineas.join("\n").trim();
+                            });
+                            setTotal((actual) => String(Math.max(0, Number(actual || 0) - Number(servicio.precio || 0))));
+                            setCantidadPiezas((actual) => String(Math.max(0, Number(actual || 0) - 1)));
+                          }}
+                          aria-label={`Eliminar ${servicio.nombre}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <textarea className="w-full border rounded-xl p-3" placeholder="Trabajo a realizar..." rows={2} value={trabajo} onChange={(e) => setTrabajo(e.target.value)} />
 
               <div className="border-2 border-dashed border-pink-200 rounded-xl p-3 text-center">
