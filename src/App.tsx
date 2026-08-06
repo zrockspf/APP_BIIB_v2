@@ -477,34 +477,45 @@ export default function TallerJoyeroApp() {
 
   // --- ENVIAR REMISIÓN NUEVA A GOOGLE SHEETS ---
   const guardarRemision = async () => {
-    if (!cliente || !trabajo || !total) {
+    if (!cliente.trim() || !trabajo.trim() || !total) {
       alert("❌ Por favor llena los campos obligatorios: Cliente, Trabajo y Total.");
       return;
     }
 
     const totalNum = Number(total || 0);
     const anticipoNum = Number(anticipo || 0);
-    const saldoCalculado = totalNum - anticipoNum;
-    const folioAGuardar = folioActual;
 
-    const datos = {
+    if (!Number.isFinite(totalNum) || totalNum <= 0) {
+      alert("❌ El total debe ser una cantidad válida mayor a cero.");
+      return;
+    }
+
+    if (!Number.isFinite(anticipoNum) || anticipoNum < 0 || anticipoNum > totalNum) {
+      alert("❌ El anticipo debe ser una cantidad válida entre $0 y el total de la nota.");
+      return;
+    }
+
+    const saldoCalculado = Math.max(0, totalNum - anticipoNum);
+    const folioAGuardar = folioActual.trim();
+
+    const payload = {
       accion: "crear_remision",
       datos: {
-      folio: folioAGuardar,
-      fechaRecibido,
-      fechaEntrega,
-      cliente,
-      celular,
-      trabajo,
-      cantidadPiezas: Number(cantidadPiezas || 1),
-      total: totalNum,
-      anticipo: anticipoNum,
-      metodoPago: anticipoNum > 0 ? metodoPagoAnticipo : "Efectivo",
-      saldo: saldoCalculado,
-      estado: "En Proceso",
-      foto: fotoPieza,
-      usuario
-      }
+        folio: folioAGuardar,
+        fechaRecibido,
+        fechaEntrega,
+        cliente: cliente.trim(),
+        celular: celular.trim(),
+        trabajo: trabajo.trim(),
+        cantidadPiezas: Math.max(1, Number(cantidadPiezas || 1)),
+        total: totalNum,
+        anticipo: anticipoNum,
+        metodoPago: anticipoNum > 0 ? metodoPagoAnticipo : "Efectivo",
+        saldo: saldoCalculado,
+        estado: "En Proceso",
+        foto: fotoPieza,
+        usuario,
+      },
     };
 
     setCargando(true);
@@ -512,31 +523,55 @@ export default function TallerJoyeroApp() {
     try {
       const respuesta = await fetch(URL_GOOGLE_SCRIPT, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(datos),
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify(payload),
       });
-      
-      const resultado = await respuesta.json();
 
-      if (resultado.status === "success") {
-        alert(`✅ Nota #${folioAGuardar} guardada en la nube.`);
-        setFileInputKey(prev => prev + 1);
-        await cargarDatosDesdeNube();
-      } else {
-        throw new Error(resultado.message || "Error desconocido en el servidor");
+      const textoRespuesta = await respuesta.text();
+
+      if (!respuesta.ok) {
+        throw new Error(
+          `Error HTTP ${respuesta.status}: ${textoRespuesta.slice(0, 300)}`
+        );
       }
 
-    } catch (error: any) {
-      console.error(error);
-      alert("⚠️ Error de guardado asíncrono. Registrando copia local temporal.");
+      let resultado: { status?: string; message?: string };
+
+      try {
+        resultado = JSON.parse(textoRespuesta);
+      } catch {
+        throw new Error(
+          "El servidor respondió con un formato no válido: " +
+            textoRespuesta.slice(0, 300)
+        );
+      }
+
+      if (resultado.status !== "success") {
+        throw new Error(resultado.message || "El servidor no confirmó el guardado.");
+      }
+
+      alert(`✅ Nota #${folioAGuardar} guardada correctamente en la nube.`);
+      setFileInputKey((valorActual) => valorActual + 1);
+
+      // El guardado ya fue confirmado. Una falla al refrescar la pantalla
+      // no debe mostrarse como si la nota no se hubiera guardado.
+      void cargarDatosDesdeNube();
+    } catch (error: unknown) {
+      console.error("Error real al guardar la remisión:", error);
+
+      const mensajeError =
+        error instanceof Error ? error.message : "Error desconocido al guardar.";
+
       const copiaTemporal: Remision = {
         folio: folioAGuardar,
         fechaRecibido,
         fechaEntrega,
-        cliente,
-        celular,
-        trabajo,
-        cantidadPiezas: Number(cantidadPiezas || 1),
+        cliente: cliente.trim(),
+        celular: celular.trim(),
+        trabajo: trabajo.trim(),
+        cantidadPiezas: Math.max(1, Number(cantidadPiezas || 1)),
         total: totalNum,
         anticipo: anticipoNum,
         saldo: saldoCalculado,
@@ -544,9 +579,32 @@ export default function TallerJoyeroApp() {
         foto: fotoPieza,
         metodoPagoAnticipo,
       };
-      setUltimasRemisiones([copiaTemporal, ...ultimasRemisiones]);
+
+      setUltimasRemisiones((actuales) => {
+        const yaExiste = actuales.some(
+          (remision) => String(remision.folio) === String(folioAGuardar)
+        );
+
+        return yaExiste ? actuales : [copiaTemporal, ...actuales];
+      });
+
+      alert(
+        "⚠️ No se pudo confirmar el guardado en la nube.\n\n" +
+          mensajeError +
+          "\n\nSe conservó una copia local temporal."
+      );
     } finally {
-      setCliente(""); setCelular(""); setTrabajo(""); setCantidadPiezas(""); setAnticipo(""); setMetodoPagoAnticipo("Efectivo"); setTotal(""); setEstado("en proceso"); setFotoPieza(""); setFechaRecibido(today); setFechaEntrega("");
+      setCliente("");
+      setCelular("");
+      setTrabajo("");
+      setCantidadPiezas("");
+      setAnticipo("");
+      setMetodoPagoAnticipo("Efectivo");
+      setTotal("");
+      setEstado("en proceso");
+      setFotoPieza("");
+      setFechaRecibido(today);
+      setFechaEntrega("");
       setCargando(false);
     }
   };
